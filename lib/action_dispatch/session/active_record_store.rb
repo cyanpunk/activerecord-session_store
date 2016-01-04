@@ -66,7 +66,7 @@ module ActionDispatch
       end
 
       private
-        def get_session(env, sid)
+        def get_session(request, sid)
           logger.silence_logger do
             unless sid and session = @@session_class.find_by_session_id(sid)
               # If the sid was nil or if there is no pre-existing session under the sid,
@@ -74,14 +74,15 @@ module ActionDispatch
               sid = generate_sid
               session = @@session_class.new(:session_id => sid, :data => {})
             end
+            env = request.is_a?(ActionDispatch::Request) ? request.env : request
             env[SESSION_RECORD_KEY] = session
             [sid, session.data]
           end
         end
 
-        def set_session(env, sid, session_data, options)
+        def set_session(request, sid, session_data, options)
           logger.silence_logger do
-            record = get_session_model(env, sid)
+            record = get_session_model(request, sid)
             record.data = session_data
             return false unless record.save
 
@@ -95,29 +96,52 @@ module ActionDispatch
             sid
           end
         end
+        alias_method :write_session, :set_session
 
-        def destroy_session(env, session_id, options)
+        def destroy_session(request, session_id, options)
           logger.silence_logger do
-            if sid = current_session_id(env)
-              get_session_model(env, sid).destroy
+            if sid = current_session_id(request)
+              get_session_model(request, sid).destroy
+              env = request.is_a?(ActionDispatch::Request) ? request.env : request
               env[SESSION_RECORD_KEY] = nil
             end
 
             generate_sid unless options[:drop]
           end
         end
+        alias_method :delete_session, :destroy_session
 
-        def get_session_model(env, sid)
-          if env[ENV_SESSION_OPTIONS_KEY][:id].nil?
-            env[SESSION_RECORD_KEY] = find_session(sid)
-          else
-            env[SESSION_RECORD_KEY] ||= find_session(sid)
+        def get_session_model(request, id)
+          logger.silence_logger do
+            model = @@session_class.find_by_session_id(id)
+            if !model
+              id = generate_sid unless ActiveRecord.version.to_s.start_with?('4.')
+              model = @@session_class.new(:session_id => id, :data => {}) 
+              return false unless model.save
+            end
+            env = request.is_a?(ActionDispatch::Request) ? request.env : request
+            if env[ENV_SESSION_OPTIONS_KEY][:id].nil?
+              env[SESSION_RECORD_KEY] = model
+            else
+              env[SESSION_RECORD_KEY] ||= model
+            end
+            model
           end
         end
 
-        def find_session(id)
-          @@session_class.find_by_session_id(id) ||
-            @@session_class.new(:session_id => id, :data => {})
+        def find_session(*args)
+          id = args.pop
+          request = args.pop
+          if request
+            model = get_session_model(request, id)
+            [model.session_id, model.data]
+          else
+            model = @@session_class.find_by_session_id(id)
+            if !model
+              model = @@session_class.new(:session_id => id, :data => {}) 
+            end
+            model
+          end
         end
 
         def logger
