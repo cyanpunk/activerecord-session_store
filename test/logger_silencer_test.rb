@@ -10,7 +10,11 @@ class LoggerSilencerTest < ActionDispatch::IntegrationTest
     end
 
     def get_session_value
-      render :text => "foo: #{session[:foo].inspect}"
+      if ActiveRecord.version.to_s.start_with?('4.')
+        render :text => "foo: #{session[:foo].inspect}"
+      else
+        render :plain => "foo: #{session[:foo].inspect}"
+      end
     end
   end
 
